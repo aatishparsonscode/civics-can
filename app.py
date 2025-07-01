@@ -20,7 +20,8 @@ CLASS_MAP = {
 # ---------------------------
 # CONFIG
 # ---------------------------
-st.set_page_config(layout="wide", initial_sidebar_state="expanded")
+# Override initial sidebar state
+st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
 st.title("Road Survey Visualization")
 
 # ---------------------------
@@ -206,5 +207,3 @@ with st.expander("Detections Table"):
     st.dataframe(det_table)
 with st.expander("Roughness Table"):
     st.dataframe(rough_table)
-# Override initial sidebar state
-st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
