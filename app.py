@@ -167,7 +167,7 @@ for _, row in det_df.iterrows():
 
     folium.Marker(
         location=[row["latitude"], row["longitude"]],
-        popup=folium.Popup(popup_html, max_width=1000),
+        popup=folium.Popup(popup_html, max_width=600),
         icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")
     ).add_to(detection_cluster)
 
@@ -206,3 +206,5 @@ with st.expander("Detections Table"):
     st.dataframe(det_table)
 with st.expander("Roughness Table"):
     st.dataframe(rough_table)
+# Override initial sidebar state
+st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
