@@ -194,7 +194,7 @@ folium.LayerControl().add_to(m)
 # Show map
 # ---------------------------
 st.subheader("Map View")
-st_data = st_folium(m, width=None, height=1000, use_container_width=True)
+st_data = st_folium(m, width=None, height=600, use_container_width=True)
 
 # ---------------------------
 # Show tables
