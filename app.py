@@ -20,7 +20,6 @@ CLASS_MAP = {
 # ---------------------------
 # CONFIG
 # ---------------------------
-# Override initial sidebar state
 st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
 st.title("Road Survey Visualization")
 
@@ -86,20 +85,28 @@ for idx, uploaded in enumerate(uploaded_zips):
 # Build DataFrames
 # ---------------------------
 det_df = pd.DataFrame(all_detections)
-det_df["class"] = det_df["class"].map(CLASS_MAP)
+if not det_df.empty:
+    det_df["class"] = det_df["class"].map(CLASS_MAP)
+
 rough_df = pd.DataFrame(all_roughness)
 
-if det_df.empty and rough_df.empty:
-    st.error("No valid data found in any ZIP!")
-    st.stop()
+# Drop rows without coordinates
+if not det_df.empty:
+    det_df = det_df.dropna(subset=["latitude", "longitude"])
+if not rough_df.empty:
+    rough_df = rough_df.dropna(subset=["latitude", "longitude"])
 
-det_df = det_df.dropna(subset=["latitude", "longitude"])
-rough_df = rough_df.dropna(subset=["latitude", "longitude"])
+if det_df.empty and rough_df.empty:
+    st.warning("No valid detection or roughness data found in any ZIP!")
+    st.stop()
 
 # ---------------------------
 # Sidebar filters
 # ---------------------------
-all_surveys = sorted(set(det_df["survey"].unique()).union(rough_df["survey"].unique()))
+det_surveys = det_df["survey"].unique() if "survey" in det_df.columns else []
+rough_surveys = rough_df["survey"].unique() if "survey" in rough_df.columns else []
+all_surveys = sorted(set(det_surveys).union(rough_surveys))
+
 selected_surveys = st.sidebar.multiselect(
     "Select surveys to display",
     options=all_surveys,
@@ -110,8 +117,10 @@ show_detections = st.sidebar.checkbox("Show Detections", value=True)
 show_roughness = st.sidebar.checkbox("Show Roughness", value=True)
 
 # Apply filters
-det_df = det_df[det_df["survey"].isin(selected_surveys)]
-rough_df = rough_df[rough_df["survey"].isin(selected_surveys)]
+if not det_df.empty:
+    det_df = det_df[det_df["survey"].isin(selected_surveys)]
+if not rough_df.empty:
+    rough_df = rough_df[rough_df["survey"].isin(selected_surveys)]
 
 if not show_detections:
     det_df = det_df.iloc[0:0]
@@ -119,21 +128,39 @@ if not show_roughness:
     rough_df = rough_df.iloc[0:0]
 
 if det_df.empty and rough_df.empty:
-    st.warning("No data for selected surveys.")
+    st.warning("No data for selected surveys after filtering.")
     st.stop()
 
 # ---------------------------
 # Map center
 # ---------------------------
-all_lats = pd.concat([det_df["latitude"], rough_df["latitude"]])
-all_lons = pd.concat([det_df["longitude"], rough_df["longitude"]])
+all_lats = pd.Series(dtype=float)
+all_lons = pd.Series(dtype=float)
+
+if not det_df.empty:
+    all_lats = pd.concat([all_lats, det_df["latitude"]])
+    all_lons = pd.concat([all_lons, det_df["longitude"]])
+if not rough_df.empty:
+    all_lats = pd.concat([all_lats, rough_df["latitude"]])
+    all_lons = pd.concat([all_lons, rough_df["longitude"]])
+
+if all_lats.empty or all_lons.empty:
+    st.warning("No valid coordinates found after filtering.")
+    st.stop()
+
 center_lat = all_lats.mean()
 center_lon = all_lons.mean()
 
 # ---------------------------
 # Create Folium Map
 # ---------------------------
-m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
+m = folium.Map(
+    location=[center_lat, center_lon],
+    zoom_start=16,
+    max_zoom=30,  # allow zooming in much further
+    min_zoom=2    # optional: allow zooming far out
+    
+)
 
 # Add Marker Clusters
 detection_cluster = MarkerCluster(name="Detections").add_to(m)
@@ -142,54 +169,55 @@ roughness_cluster = MarkerCluster(name="Roughness").add_to(m)
 # ---------------------------
 # Add detections with clustering
 # ---------------------------
-for _, row in det_df.iterrows():
-    frame_num = row["frame"]
-    survey_name = row["survey"]
+if not det_df.empty:
+    for _, row in det_df.iterrows():
+        frame_num = row["frame"]
+        survey_name = row["survey"]
 
-    # Popup with just coordinates and image
-    popup_html = f"""
-    <b>Coordinates:</b> {row['latitude']:.5f}, {row['longitude']:.5f}<br>
-    """
+        popup_html = f"""
+        <b>Coordinates:</b> {row['latitude']:.5f}, {row['longitude']:.5f}<br>
+        """
 
-    # Fuzzy image matching
-    img_bytes = None
-    frame_num_str = str(int(frame_num))
-    for (survey, filename), img in st.session_state["images_cache"].items():
-        if survey == survey_name and filename.lower().rstrip(".jpg").endswith(frame_num_str):
-            img_bytes = img
-            break
+        img_bytes = None
+        frame_num_str = str(int(frame_num))
+        for (survey, filename), img in st.session_state["images_cache"].items():
+            if survey == survey_name and filename.lower().rstrip(".jpg").endswith(frame_num_str):
+                img_bytes = img
+                break
 
-    if img_bytes:
-        b64 = base64.b64encode(img_bytes).decode("utf-8")
-        img_tag = f'<img src="data:image/jpeg;base64,{b64}" width="600">'
-        popup_html += img_tag
-    else:
-        popup_html += "<i>(Image missing)</i>"
+        if img_bytes:
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
+            img_tag = f'<img src="data:image/jpeg;base64,{b64}" width="600">'
+            popup_html += img_tag
+        else:
+            popup_html += "<i>(Image missing)</i>"
 
-    folium.Marker(
-        location=[row["latitude"], row["longitude"]],
-        popup=folium.Popup(popup_html, max_width=600),
-        icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")
-    ).add_to(detection_cluster)
+        folium.Marker(
+            location=[row["latitude"], row["longitude"]],
+            popup=folium.Popup(popup_html, max_width=600),
+            icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")
+        ).add_to(detection_cluster)
 
 # ---------------------------
 # Add roughness with clustering
 # ---------------------------
-for _, row in rough_df.iterrows():
-    survey_name = row["survey"]
-    popup_html = f"""
-    <b>Coordinates:</b> {row['latitude']:.5f}, {row['longitude']:.5f}<br>
-    <b>Magnitude:</b> {row['magnitude_xy']:.2f}
-    """
+if not rough_df.empty:
+    for _, row in rough_df.iterrows():
+        survey_name = row["survey"]
+        popup_html = f"""
+        <b>Coordinates:</b> {row['latitude']:.5f}, {row['longitude']:.5f}<br>
+        <b>Magnitude:</b> {row['magnitude_xy']:.2f}
+        """
 
-    folium.Marker(
-        location=[row["latitude"], row["longitude"]],
-        popup=folium.Popup(popup_html, max_width=600),
-        icon=folium.Icon(color="orange", icon="car", prefix="fa")
-    ).add_to(roughness_cluster)
+        folium.Marker(
+            location=[row["latitude"], row["longitude"]],
+            popup=folium.Popup(popup_html, max_width=600),
+            icon=folium.Icon(color="orange", icon="car", prefix="fa")
+        ).add_to(roughness_cluster)
 
-# Add layer control
-folium.LayerControl().add_to(m)
+# Add layer control only if there's at least one layer
+if not det_df.empty or not rough_df.empty:
+    folium.LayerControl().add_to(m)
 
 # ---------------------------
 # Show map
@@ -200,10 +228,14 @@ st_data = st_folium(m, width=None, height=600, use_container_width=True)
 # ---------------------------
 # Show tables
 # ---------------------------
-det_table = det_df[["latitude", "longitude", "class"]]
-rough_table = rough_df[["latitude", "longitude", "magnitude_xy"]]
-
 with st.expander("Detections Table"):
-    st.dataframe(det_table)
+    if not det_df.empty:
+        st.dataframe(det_df[["latitude", "longitude", "class"]])
+    else:
+        st.info("No detections data to display.")
+
 with st.expander("Roughness Table"):
-    st.dataframe(rough_table)
+    if not rough_df.empty:
+        st.dataframe(rough_df[["latitude", "longitude", "magnitude_xy"]])
+    else:
+        st.info("No roughness data to display.")
